@@ -26,7 +26,7 @@ button{font:inherit;border:0;background:none;color:inherit;cursor:pointer;paddin
 input{font:inherit}
 
 /* view */
-.view{position:absolute;inset:0;display:none;flex-direction:column;background:#fff}
+.view{position:absolute;inset:0;display:none;flex-direction:column;background:#fff;overflow:hidden}
 .view.on{display:flex}
 #v-cam{background:#000}
 
@@ -49,8 +49,9 @@ input{font:inherit}
 }
 
 /* camera */
-.stagewrap{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
-.frame{position:relative;width:100%;height:100%}
+.stagewrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  position:relative;overflow:hidden}
+.frame{position:relative;width:100%;height:100%;max-width:100%;max-height:100%;flex:none}
 .frame video,.frame canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
 .frame video{object-fit:cover}
 .frame canvas.pv{object-fit:contain;background:#000}
@@ -84,7 +85,9 @@ input{font:inherit}
 }
 
 /* body scroll */
-.body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px 40px}
+.body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px 40px}
+.acts{flex:none;position:relative;z-index:2;background:#fff;
+  padding:12px 16px calc(16px + env(safe-area-inset-bottom))}
 
 /* list */
 .item{display:flex;align-items:center;gap:12px;padding:14px 4px;border-bottom:1px solid var(--line)}
@@ -184,7 +187,7 @@ label.f>input:focus{outline:2px solid var(--ink)}
   <div class="stagewrap" style="background:#000">
     <div class="frame" id="sframe"><canvas class="pv" id="spv"></canvas><canvas class="ov" id="sov"></canvas></div>
   </div>
-  <div class="body" style="flex:none;padding:12px 16px calc(20px + env(safe-area-inset-bottom))">
+  <div class="acts">
     <button class="btn g" id="sEdit">黒板の内容を編集</button>
     <button class="btn" id="sSave">この写真を保存</button>
   </div>
@@ -230,7 +233,7 @@ label.f>input:focus{outline:2px solid var(--ink)}
   <div class="stagewrap" style="background:#000">
     <div class="frame" id="poframe"><canvas class="pv" id="popv"></canvas><canvas class="ov" id="poov"></canvas></div>
   </div>
-  <div class="body" style="flex:none;padding:12px 16px calc(20px + env(safe-area-inset-bottom))">
+  <div class="acts">
     <button class="btn g" id="poEdit">黒板の内容を編集</button>
     <button class="btn q" id="poSave">画像として保存</button>
     <button class="btn q" id="poDel">この写真を削除</button>
@@ -274,8 +277,7 @@ label.f>input:focus{outline:2px solid var(--ink)}
     <div class="hd"><h3>設定</h3><button data-close>完了</button></div>
     <div class="sc">
       <label class="f"><span>保存用URL（GASウェブアプリ）</span><input type="text" id="seUrl" placeholder="https://script.google.com/macros/s/.../exec"></label>
-      <p class="note" style="margin:-6px 2px 14px">script.google.com/macros/s/……/exec の形です。googleusercontent.com のURLは使えません。</p>
-      <label class="f"><span>合言葉</span><input type="text" id="seTok" placeholder="GAS側と同じ文字列"></label>
+      <p class="note" style="margin:-6px 2px 14px">script.google.com/macros/s/……/exec の形です。このURLが鍵のかわりになるので、人に見せないでください。</p>
       <button class="btn g" id="seTest">接続を確認</button>
       <p class="note" style="margin-top:20px">お気に入りフォルダ</p>
       <div id="seFav"></div>
@@ -346,7 +348,7 @@ const Store=(()=>{
 })();
 
 /* ---------- 状態 ---------- */
-const S={ sites:[], siteId:null, settings:{url:'',token:'',fav:[]}, photos:[], photo:null, shot:null };
+const S={ sites:[], siteId:null, settings:{url:'',fav:[]}, photos:[], photo:null, shot:null };
 const bmpCache=new Map();
 
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');
@@ -411,10 +413,12 @@ function drawBoard(ctx,o){
   }
 }
 // 写真の縦横比ぴったりに枠を合わせる（黒板の位置ズレ防止）
-function fitFrame(frame,w,h){
-  const box=frame.parentElement.getBoundingClientRect();
-  if(!box.width||!w||!h)return;
-  const k=Math.min(box.width/w,box.height/h);
+function fitFrame(frame,w,h,retry){
+  if(!w||!h)return;
+  const par=frame.parentElement;
+  const bw=par.clientWidth, bh=par.clientHeight;
+  if((!bw||!bh)&&(retry||0)<10){ requestAnimationFrame(()=>fitFrame(frame,w,h,(retry||0)+1)); return; }
+  const k=Math.min(bw/w,bh/h);
   frame.style.width=Math.round(w*k)+'px';
   frame.style.height=Math.round(h*k)+'px';
 }
@@ -507,12 +511,18 @@ attachDrag($('#poov'),()=>S.photo,()=>S.photo&&Store.put(S.photo));
 $('#sBack').onclick=()=>{ if(S.shot)bmpCache.delete(S.shot.id); S.shot=null; view('v-cam');
   requestAnimationFrame(()=>drawOverlay($('#ov'),camObj())); };
 $('#sSave').onclick=async()=>{
-  const s=site();
-  s.board={...S.shot.board}; await save();
-  await Store.put(S.shot); S.shot=null;
-  await refreshCount();
-  view('v-cam'); toast('保存しました');
-  requestAnimationFrame(()=>drawOverlay($('#ov'),camObj()));
+  const b=$('#sSave');
+  if(!S.shot){toast('写真がありません');return}
+  b.disabled=true;b.textContent='保存中…';
+  try{
+    const s=site();
+    if(s){s.board={...S.shot.board};await save();}
+    await Store.put(S.shot); S.shot=null;
+    await refreshCount();
+    view('v-cam'); toast('保存しました');
+    requestAnimationFrame(()=>drawOverlay($('#ov'),camObj()));
+  }catch(e){ toast('保存できません：'+(e.message||e)); }
+  b.disabled=false;b.textContent='この写真を保存';
 };
 $('#sEdit').onclick=()=>openBoard(S.shot,'この写真の黒板',()=>drawOverlay($('#sov'),S.shot));
 
@@ -585,7 +595,7 @@ async function refreshCount(){
   b.textContent=n;b.classList.toggle('hidden',n===0);
 }
 $('#cSet').onclick=()=>{
-  $('#seUrl').value=S.settings.url;$('#seTok').value=S.settings.token;
+  $('#seUrl').value=S.settings.url;
   renderFav();sheet('sh-set');
 };
 
@@ -680,7 +690,7 @@ async function gas(payload){
   try{
     r=await fetch(u,{method:'POST',redirect:'follow',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({...payload,token:S.settings.token||''})});
+      body:JSON.stringify(payload)});
   }catch(e){ throw new Error('つながりません。デプロイのアクセス権を「全員」にしてください'); }
   let j;
   try{ j=JSON.parse(await r.text()); }
@@ -744,7 +754,6 @@ function renderFav(){
   });
 }
 $('#seUrl').addEventListener('input',e=>{S.settings.url=e.target.value.trim();saveSet()});
-$('#seTok').addEventListener('input',e=>{S.settings.token=e.target.value.trim();saveSet()});
 $('#seTest').onclick=async()=>{
   try{const j=await gas({action:'ping'});toast('つながりました（'+(j.user||'OK')+'）')}
   catch(e){toast(e.message)}
@@ -793,6 +802,9 @@ $('#drUse').onclick=()=>{
 };
 
 /* ---------- 起動 ---------- */
+addEventListener('error',e=>toast('エラー：'+(e.message||'')));
+addEventListener('unhandledrejection',e=>toast('エラー：'+((e.reason&&e.reason.message)||e.reason||'')));
+
 (async function(){
   await Store.open();
   S.sites=(await Store.get('sites'))||[];
