@@ -154,7 +154,7 @@ label.f>input:focus{outline:2px solid var(--ink)}
   <div class="top">
     <button class="t-btn" id="cSite">現場</button>
     <div class="chip" id="cName">現場を選ぶ</div>
-    <button class="t-btn r" id="cBoard">黒板</button>
+    <span class="t-btn r"></span>
   </div>
   <div class="stagewrap">
     <div class="frame" id="frame">
@@ -413,23 +413,26 @@ async function compose(ph){
 }
 
 /* ---------- ドラッグ ---------- */
-function attachDrag(cv,get,after){
-  let on=false,ox=0,oy=0;
+function attachDrag(cv,get,after,onTap){
+  let on=false,ox=0,oy=0,sx=0,sy=0,moved=0;
   const pt=e=>{const r=cv.getBoundingClientRect(),o=get();
     return {x:(e.clientX-r.left)/r.width*o.w,y:(e.clientY-r.top)/r.height*o.h}};
   cv.addEventListener('pointerdown',e=>{
     const o=get(); if(!o)return; const b=boxOf(o),q=pt(e);
     if(q.x>=b.left&&q.x<=b.left+b.bw&&q.y>=b.top&&q.y<=b.top+b.bh){
-      on=true;cv.setPointerCapture(e.pointerId);
+      on=true;cv.setPointerCapture(e.pointerId);moved=0;sx=e.clientX;sy=e.clientY;
       ox=q.x-(b.left+b.bw);oy=q.y-(b.top+b.bh);e.preventDefault();}
   });
   cv.addEventListener('pointermove',e=>{
     if(!on)return;const o=get(),q=pt(e);
+    moved=Math.max(moved,Math.hypot(e.clientX-sx,e.clientY-sy));
     o.board.x=Math.max(.12,Math.min(1,(q.x-ox)/o.w));
     o.board.y=Math.max(.12,Math.min(1,(q.y-oy)/o.h));
     drawOverlay(cv,o);e.preventDefault();
   });
-  const up=()=>{if(on){on=false;after&&after()}};
+  const up=()=>{if(!on)return;on=false;
+    if(moved<8&&onTap){onTap();return}
+    after&&after();};
   cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
 }
 
@@ -475,9 +478,12 @@ $('#shot').onclick=async()=>{
   pv.getContext('2d').drawImage(bmpCache.get(S.shot.id),0,0);
   requestAnimationFrame(()=>drawOverlay($('#sov'),S.shot));
 };
-attachDrag($('#ov'),()=>camObj(),()=>{const s=site();if(s)save()});
-attachDrag($('#sov'),()=>S.shot);
-attachDrag($('#poov'),()=>S.photo,()=>S.photo&&Store.put(S.photo));
+attachDrag($('#ov'),()=>camObj(),()=>{const s=site();if(s)save()},
+  ()=>{const s=site();if(s)openBoard(s,'黒板',()=>drawOverlay($('#ov'),camObj()))});
+attachDrag($('#sov'),()=>S.shot,null,
+  ()=>openBoard(S.shot,'黒板',()=>drawOverlay($('#sov'),S.shot)));
+attachDrag($('#poov'),()=>S.photo,()=>S.photo&&Store.put(S.photo),
+  ()=>openBoard(S.photo,'黒板',()=>drawOverlay($('#poov'),S.photo)));
 
 $('#sBack').onclick=()=>{ if(S.shot)bmpCache.delete(S.shot.id); S.shot=null; view('v-cam');
   requestAnimationFrame(()=>drawOverlay($('#ov'),camObj())); };
@@ -565,8 +571,6 @@ async function refreshCount(){
   const n=await Store.count(s.id);
   b.textContent=n;b.classList.toggle('hidden',n===0);
 }
-$('#cBoard').onclick=()=>{const s=site();
-  if(s)openBoard(s,'黒板（この現場の初期値）',()=>drawOverlay($('#ov'),camObj()))};
 
 /* ---------- 写真一覧 ---------- */
 async function openPhotos(sid){
@@ -669,8 +673,10 @@ addEventListener('unhandledrejection',e=>toast('エラー：'+((e.reason&&e.reas
   if(!S.sites.length){const s=newSite('現場1');S.sites=[s];S.siteId=s.id;await save()}
   if(!site())S.siteId=S.sites[0].id;
   updateChip();refreshCount();
-  $('#cName').onclick=()=>{const s=site();if(s)openBoard(s,'黒板（この現場の初期値）',()=>drawOverlay($('#ov'),camObj()))};
+  $('#cName').onclick=()=>{const s=site();if(!s)return;$('#stName').value=s.name;sheet('sh-site')};
   await startCam();
+  if(!(await Store.get('hinted'))){ await Store.set('hinted',1);
+    setTimeout(()=>toast('黒板をタップすると入力できます'),700); }
   addEventListener('resize',()=>{
     const v=document.querySelector('.view.on');
     if(v.id==='v-cam'){const c=camObj();const q=$('#cam');
