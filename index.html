@@ -103,9 +103,6 @@ input{font:inherit}
 .cell img{width:100%;height:100%;object-fit:cover;display:block}
 .cell i{position:absolute;left:4px;top:4px;background:rgba(0,0,0,.6);color:#fff;
   font-size:10px;font-style:normal;padding:1px 6px;border-radius:999px}
-.cell u{position:absolute;right:4px;bottom:4px;width:14px;height:14px;border-radius:50%;
-  background:#fff;border:1px solid var(--line);text-decoration:none}
-.cell u.up{background:var(--ink);border-color:var(--ink)}
 
 .empty{text-align:center;color:var(--sub);font-size:13px;padding:44px 20px}
 .btn{display:block;width:100%;padding:14px;border-radius:999px;background:var(--ink);color:#fff;
@@ -140,8 +137,9 @@ label.f>input:focus{outline:2px solid var(--ink)}
 .sheet .hd button{font-size:14px;color:var(--sub);min-height:44px;min-width:56px}
 .sheet .sc{overflow-y:auto;padding:8px 16px calc(24px + env(safe-area-inset-bottom))}
 
-.toast{position:absolute;left:50%;bottom:26px;transform:translate(-50%,16px);z-index:60;
-  background:rgba(10,10,10,.92);color:#fff;padding:10px 18px;border-radius:999px;font-size:13px;
+.toast{position:absolute;left:50%;top:calc(var(--top) + env(safe-area-inset-top) + 10px);
+  transform:translate(-50%,-10px);z-index:60;max-width:86%;text-align:center;
+  background:rgba(10,10,10,.92);color:#fff;padding:10px 18px;border-radius:18px;font-size:13px;
   opacity:0;pointer-events:none;transition:.22s}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .hidden{display:none!important}
@@ -156,7 +154,7 @@ label.f>input:focus{outline:2px solid var(--ink)}
   <div class="top">
     <button class="t-btn" id="cSite">現場</button>
     <div class="chip" id="cName">現場を選ぶ</div>
-    <button class="t-btn r" id="cSet">設定</button>
+    <button class="t-btn r" id="cBoard">黒板</button>
   </div>
   <div class="stagewrap">
     <div class="frame" id="frame">
@@ -218,7 +216,6 @@ label.f>input:focus{outline:2px solid var(--ink)}
     <div class="empty hidden" id="phEmpty">この現場の写真はまだありません</div>
     <div id="phActions">
       <button class="btn" id="phPdf">PDFを作る</button>
-      <button class="btn g" id="phDrive">ドライブへ保存</button>
     </div>
   </div>
 </section>
@@ -263,37 +260,7 @@ label.f>input:focus{outline:2px solid var(--ink)}
     <div class="hd"><h3>現場の設定</h3><button data-close>完了</button></div>
     <div class="sc">
       <label class="f"><span>現場名</span><input type="text" id="stName" placeholder="○○邸 新築工事"></label>
-      <div class="sw"><span>保存先フォルダ</span><span id="stDrive" style="color:var(--sub);font-size:13px">未設定</span></div>
-      <button class="btn g" id="stPick">ドライブのフォルダを選ぶ</button>
       <button class="btn q" id="stDel">この現場を削除</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===== 設定シート ===== -->
-<div class="sheet" id="sh-set">
-  <div class="bd"></div>
-  <div class="pn">
-    <div class="hd"><h3>設定</h3><button data-close>完了</button></div>
-    <div class="sc">
-      <label class="f"><span>保存用URL（GASウェブアプリ）</span><input type="text" id="seUrl" placeholder="https://script.google.com/macros/s/.../exec"></label>
-      <p class="note" style="margin:-6px 2px 14px">script.google.com/macros/s/……/exec の形です。このURLが鍵のかわりになるので、人に見せないでください。</p>
-      <button class="btn g" id="seTest">接続を確認</button>
-      <p class="note" style="margin-top:20px">お気に入りフォルダ</p>
-      <div id="seFav"></div>
-      <button class="btn q" id="seAddFav">ドライブから追加</button>
-    </div>
-  </div>
-</div>
-
-<!-- ===== ドライブ選択シート ===== -->
-<div class="sheet" id="sh-drive">
-  <div class="bd"></div>
-  <div class="pn">
-    <div class="hd"><button id="drUp" style="min-width:44px">上へ</button><h3 id="drHere" style="text-align:center">マイドライブ</h3><button data-close>閉じる</button></div>
-    <div class="sc">
-      <div id="drList"></div>
-      <button class="btn" id="drUse">ここに決める</button>
     </div>
   </div>
 </div>
@@ -348,7 +315,7 @@ const Store=(()=>{
 })();
 
 /* ---------- 状態 ---------- */
-const S={ sites:[], siteId:null, settings:{url:'',fav:[]}, photos:[], photo:null, shot:null };
+const S={ sites:[], siteId:null, photos:[], photo:null, shot:null };
 const bmpCache=new Map();
 
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');
@@ -365,7 +332,6 @@ function site(){return S.sites.find(x=>x.id===S.siteId)||null;}
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 
 async function save(){ await Store.set('sites',S.sites); await Store.set('siteId',S.siteId); }
-async function saveSet(){ await Store.set('settings',S.settings); }
 
 /* ---------- 黒板描画 ---------- */
 function rowsOf(f){return FIELDS.filter(x=>(f[x.k]||'').trim()).map(x=>({l:x.l,v:f[x.k].trim()}));}
@@ -432,11 +398,15 @@ function drawOverlay(cv,o){
   ctx.setTransform(k,0,0,k,0,0);
   drawBoard(ctx,o);
 }
+function photoBlob(ph){
+  if(ph.buf)return new Blob([ph.buf],{type:ph.mime||'image/jpeg'});
+  return ph.blob;   // 旧データ用
+}
 async function compose(ph){
   const c=document.createElement('canvas'); c.width=ph.w; c.height=ph.h;
   const ctx=c.getContext('2d');
   let bmp=bmpCache.get(ph.id);
-  if(!bmp){ bmp=await createImageBitmap(ph.blob); bmpCache.set(ph.id,bmp); }
+  if(!bmp){ bmp=await createImageBitmap(photoBlob(ph)); bmpCache.set(ph.id,bmp); }
   ctx.drawImage(bmp,0,0,ph.w,ph.h);
   drawBoard(ctx,ph);
   return c;
@@ -495,8 +465,9 @@ $('#shot').onclick=async()=>{
   c.width=Math.round(v.videoWidth*r);c.height=Math.round(v.videoHeight*r);
   c.getContext('2d').drawImage(v,0,0,c.width,c.height);
   const blob=await new Promise(res=>c.toBlob(res,'image/jpeg',.92));
-  S.shot={id:uid(),siteId:s.id,blob,w:c.width,h:c.height,
-    f:JSON.parse(JSON.stringify(s.f)),board:{...s.board},at:Date.now(),drive:''};
+  S.shot={id:uid(),siteId:s.id,buf:await blob.arrayBuffer(),mime:'image/jpeg',
+    w:c.width,h:c.height,
+    f:JSON.parse(JSON.stringify(s.f)),board:{...s.board},at:Date.now()};
   bmpCache.set(S.shot.id,await createImageBitmap(blob));
   view('v-shot');
   const pv=$('#spv');pv.width=S.shot.w;pv.height=S.shot.h;
@@ -543,7 +514,7 @@ let bdTarget=null,bdAfter=null;
 })();
 function persistTarget(){
   if(!bdTarget||bdTarget===S.shot)return;
-  if(bdTarget.siteId!==undefined&&bdTarget.blob)Store.put(bdTarget);
+  if(bdTarget.siteId!==undefined&&(bdTarget.buf||bdTarget.blob))Store.put(bdTarget);
   else save();
 }
 function openBoard(target,title,after){
@@ -560,7 +531,7 @@ function openBoard(target,title,after){
 function newSite(name){
   const f={};FIELDS.forEach(x=>f[x.k]='');
   f.kouji=name;f.date=todayJP();f.useDate=true;
-  return {id:uid(),name,f,board:{x:.975,y:.975,s:.38},driveId:'',driveName:'',at:Date.now()};
+  return {id:uid(),name,f,board:{x:.975,y:.975,s:.38},at:Date.now()};
 }
 async function renderSites(){
   const box=$('#siList');box.innerHTML='';
@@ -570,7 +541,7 @@ async function renderSites(){
     d.className='item'+(s.id===S.siteId?' sel':'');
     d.innerHTML='<div class="m"><b></b><span></span></div><div class="arrow">›</div>';
     d.querySelector('b').textContent=s.name;
-    d.querySelector('span').textContent=n+'枚'+(s.driveName?' ・ '+s.driveName:'');
+    d.querySelector('span').textContent=n+'枚';
     d.onclick=async()=>{S.siteId=s.id;await save();openPhotos(s.id)};
     box.appendChild(d);
   }
@@ -594,10 +565,8 @@ async function refreshCount(){
   const n=await Store.count(s.id);
   b.textContent=n;b.classList.toggle('hidden',n===0);
 }
-$('#cSet').onclick=()=>{
-  $('#seUrl').value=S.settings.url;
-  renderFav();sheet('sh-set');
-};
+$('#cBoard').onclick=()=>{const s=site();
+  if(s)openBoard(s,'黒板（この現場の初期値）',()=>drawOverlay($('#ov'),camObj()))};
 
 /* ---------- 写真一覧 ---------- */
 async function openPhotos(sid){
@@ -608,7 +577,7 @@ async function openPhotos(sid){
   for(let i=0;i<S.photos.length;i++){
     const ph=S.photos[i];
     const c=document.createElement('div');c.className='cell';
-    c.innerHTML='<i>'+(i+1)+'</i>'+(ph.drive?'<u class="up"></u>':'');
+    c.innerHTML='<i>'+(i+1)+'</i>';
     const im=document.createElement('img');c.prepend(im);
     (await compose(ph)).toBlob(b=>im.src=URL.createObjectURL(b),'image/jpeg',.6);
     c.onclick=()=>openPhoto(ph);
@@ -621,7 +590,7 @@ async function openPhotos(sid){
 $('#phBack').onclick=()=>{renderSites();view('v-sites')};
 $('#phSet').onclick=()=>{
   const s=site();$('#stName').value=s.name;
-  $('#stDrive').textContent=s.driveName||'未設定';sheet('sh-site');
+  sheet('sh-site');
 };
 
 /* ---------- 写真1枚 ---------- */
@@ -630,7 +599,7 @@ async function openPhoto(ph){
   const i=S.photos.indexOf(ph);$('#poTitle').textContent=(i+1)+' / '+S.photos.length;
   const pv=$('#popv');pv.width=ph.w;pv.height=ph.h;
   fitFrame($('#poframe'),ph.w,ph.h);
-  let bmp=bmpCache.get(ph.id);if(!bmp){bmp=await createImageBitmap(ph.blob);bmpCache.set(ph.id,bmp)}
+  let bmp=bmpCache.get(ph.id);if(!bmp){bmp=await createImageBitmap(photoBlob(ph));bmpCache.set(ph.id,bmp)}
   pv.getContext('2d').drawImage(bmp,0,0);
   view('v-photo');
   requestAnimationFrame(()=>drawOverlay($('#poov'),ph));
@@ -680,52 +649,6 @@ $('#phPdf').onclick=async()=>{
   const s=site();doc.save((s?s.name:'photos').replace(/[\\/:*?"<>|]/g,'')+'.pdf');
 };
 
-/* ---------- ドライブ（GAS経由） ---------- */
-async function gas(payload){
-  const u=S.settings.url;
-  if(!u)throw new Error('設定で保存用URLを入れてください');
-  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(u))
-    throw new Error('URLが違います。GASの「デプロイを管理」に出る /exec のURLを貼ってください');
-  let r;
-  try{
-    r=await fetch(u,{method:'POST',redirect:'follow',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify(payload)});
-  }catch(e){ throw new Error('つながりません。デプロイのアクセス権を「全員」にしてください'); }
-  let j;
-  try{ j=JSON.parse(await r.text()); }
-  catch(e){ throw new Error('応答が読めません。ウェブアプリとして再デプロイしてください'); }
-  if(!j.ok)throw new Error(j.error||'保存できませんでした');
-  return j;
-}
-const b64=blob=>new Promise((res,rej)=>{const r=new FileReader();
-  r.onload=()=>res(r.result.split(',')[1]);r.onerror=rej;r.readAsDataURL(blob)});
-
-$('#phDrive').onclick=async()=>{
-  const s=site();
-  if(!s.driveId){toast('先に保存先フォルダを選んでください');$('#phSet').click();return}
-  const btn=$('#phDrive');btn.disabled=true;
-  try{
-    for(let i=0;i<S.photos.length;i++){
-      const ph=S.photos[i];
-      if(ph.drive)continue;
-      btn.textContent='送信中 '+(i+1)+'/'+S.photos.length;
-      const c=await compose(ph);
-      const blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.9));
-      const j=await gas({action:'upload',folderId:s.driveId,subFolder:s.name,
-        name:fname(ph)+'.jpg',mimeType:'image/jpeg',data:await b64(blob)});
-      ph.drive=j.url;await Store.put(ph);
-    }
-    btn.textContent='PDFも送信中';
-    const doc=await buildPdf();
-    await gas({action:'upload',folderId:s.driveId,subFolder:s.name,
-      name:s.name.replace(/[\\/:*?"<>|]/g,'')+'.pdf',mimeType:'application/pdf',
-      data:await b64(doc.output('blob'))});
-    toast('ドライブに保存しました');openPhotos(s.id);
-  }catch(e){ toast(e.message) }
-  btn.disabled=false;btn.textContent='ドライブへ保存';
-};
-
 /* ---------- 現場設定 ---------- */
 $('#stName').addEventListener('input',e=>{const s=site();if(!s)return;
   s.name=e.target.value;$('#phTitle').textContent=s.name;updateChip();save()});
@@ -735,72 +658,6 @@ $('#stDel').onclick=async()=>{
   S.sites=S.sites.filter(x=>x.id!==s.id);S.siteId=S.sites[0]?S.sites[0].id:null;
   await save();sheet('sh-site',false);updateChip();refreshCount();renderSites();view('v-sites');
 };
-let drTarget='site';
-$('#stPick').onclick=()=>{drTarget='site';openDrive('root')};
-$('#seAddFav').onclick=()=>{drTarget='fav';openDrive('root')};
-
-/* ---------- お気に入り ---------- */
-function renderFav(){
-  const box=$('#seFav');box.innerHTML='';
-  if(!S.settings.fav.length){box.innerHTML='<p class="note">まだありません</p>';return}
-  S.settings.fav.forEach((f,i)=>{
-    const d=document.createElement('div');d.className='item';
-    d.innerHTML='<div class="m"><b></b></div><button style="color:var(--sub);font-size:13px">外す</button>';
-    d.querySelector('b').textContent=f.name;
-    d.querySelector('button').onclick=e=>{e.stopPropagation();S.settings.fav.splice(i,1);saveSet();renderFav()};
-    d.onclick=()=>{const s=site();if(!s)return;s.driveId=f.id;s.driveName=f.name;save();
-      $('#stDrive').textContent=f.name;toast(f.name+' を保存先にしました')};
-    box.appendChild(d);
-  });
-}
-$('#seUrl').addEventListener('input',e=>{S.settings.url=e.target.value.trim();saveSet()});
-$('#seTest').onclick=async()=>{
-  try{const j=await gas({action:'ping'});toast('つながりました（'+(j.user||'OK')+'）')}
-  catch(e){toast(e.message)}
-};
-
-/* ---------- ドライブ参照 ---------- */
-let drNow={id:'root',name:'マイドライブ'},drStack=[];
-async function openDrive(id){
-  sheet('sh-drive');$('#drList').innerHTML='<p class="note">読み込み中…</p>';
-  try{
-    const j=await gas({action:'list',parentId:id});
-    drNow={id:j.id,name:j.name};$('#drHere').textContent=j.name;
-    const box=$('#drList');box.innerHTML='';
-    if(!j.folders.length)box.innerHTML='<p class="note">下位フォルダはありません</p>';
-    j.folders.forEach(f=>{
-      const d=document.createElement('div');d.className='item';
-      d.innerHTML='<div class="m"><b></b></div><div class="arrow">›</div>';
-      d.querySelector('b').textContent=f.name;
-      d.onclick=()=>{drStack.push(drNow);openDrive(f.id)};
-      box.appendChild(d);
-    });
-    // お気に入りも並べる
-    if(S.settings.fav.length&&id==='root'){
-      const t=document.createElement('p');t.className='note';t.textContent='お気に入り';box.prepend(t);
-      [...S.settings.fav].reverse().forEach(f=>{
-        const d=document.createElement('div');d.className='item';
-        d.innerHTML='<div class="m"><b>★ </b></div><div class="arrow">›</div>';
-        d.querySelector('b').textContent='★ '+f.name;
-        d.onclick=()=>{drStack.push(drNow);openDrive(f.id)};
-        box.prepend(d);
-      });
-    }
-  }catch(e){$('#drList').innerHTML='<p class="note">'+e.message+'</p>'}
-}
-$('#drUp').onclick=()=>{const p=drStack.pop();openDrive(p?p.id:'root')};
-$('#drUse').onclick=()=>{
-  if(drTarget==='site'){
-    const s=site();if(!s)return;
-    s.driveId=drNow.id;s.driveName=drNow.name;save();
-    $('#stDrive').textContent=drNow.name;toast('保存先にしました');
-  }else{
-    if(!S.settings.fav.some(f=>f.id===drNow.id)){S.settings.fav.push({id:drNow.id,name:drNow.name});saveSet()}
-    renderFav();toast('お気に入りに入れました');
-  }
-  sheet('sh-drive',false);drStack=[];
-};
-
 /* ---------- 起動 ---------- */
 addEventListener('error',e=>toast('エラー：'+(e.message||'')));
 addEventListener('unhandledrejection',e=>toast('エラー：'+((e.reason&&e.reason.message)||e.reason||'')));
@@ -809,7 +666,6 @@ addEventListener('unhandledrejection',e=>toast('エラー：'+((e.reason&&e.reas
   await Store.open();
   S.sites=(await Store.get('sites'))||[];
   S.siteId=(await Store.get('siteId'))||null;
-  S.settings=Object.assign(S.settings,(await Store.get('settings'))||{});
   if(!S.sites.length){const s=newSite('現場1');S.sites=[s];S.siteId=s.id;await save()}
   if(!site())S.siteId=S.sites[0].id;
   updateChip();refreshCount();
