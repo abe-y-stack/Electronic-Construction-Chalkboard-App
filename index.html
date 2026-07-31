@@ -103,6 +103,10 @@ input{font:inherit}
 .cell img{width:100%;height:100%;object-fit:cover;display:block}
 .cell i{position:absolute;left:4px;top:4px;background:rgba(0,0,0,.6);color:#fff;
   font-size:10px;font-style:normal;padding:1px 6px;border-radius:999px}
+.cell.sel{outline:3px solid var(--ink);outline-offset:-3px}
+.cell .chk{position:absolute;right:4px;top:4px;width:20px;height:20px;border-radius:50%;
+  background:var(--ink);color:#fff;font-size:12px;display:none;align-items:center;justify-content:center}
+.cell.sel .chk{display:flex}
 
 .empty{text-align:center;color:var(--sub);font-size:13px;padding:44px 20px}
 #phImportWrap{margin-top:16px}
@@ -224,7 +228,15 @@ label.f>input:focus{outline:2px solid var(--ink)}
       <input type="file" id="phImportDirInput" accept="image/*" multiple webkitdirectory class="hidden">
     </div>
     <div id="phActions">
+      <button class="btn g" id="phSelectBtn">複数選んで黒板をまとめて編集</button>
       <button class="btn" id="phPdf">PDFを作る</button>
+    </div>
+  </div>
+  <div class="acts hidden" id="phBatchBar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="phSelCount" style="flex:1;font-size:13px;color:var(--sub)">0枚選択中</span>
+      <button class="btn q" id="phSelCancel" style="width:auto;padding:10px 16px;margin:0">やめる</button>
+      <button class="btn" id="phBatchEdit" style="width:auto;padding:10px 16px;margin:0">まとめて編集</button>
     </div>
   </div>
 </section>
@@ -252,12 +264,45 @@ label.f>input:focus{outline:2px solid var(--ink)}
   <div class="pn">
     <div class="hd"><h3 id="bdTitle">黒板</h3><button data-close>完了</button></div>
     <div class="sc">
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn q" id="bdTplLoad" style="margin:0;flex:1">テンプレートを使う</button>
+        <button class="btn q" id="bdTplSave" style="margin:0;flex:1">テンプレートに保存</button>
+      </div>
       <div class="rng"><span style="font-size:11px;color:var(--sub)">大きさ</span>
         <input type="range" id="bdSize" min="22" max="60" value="38"></div>
       <div id="bdFields"></div>
       <div class="sw"><span>日付を入れる</span><input type="checkbox" id="bdUseDate" checked></div>
       <label class="f" style="margin-top:12px"><span>日付</span><input type="text" id="bdDate"></label>
       <p class="note">入力した項目だけが黒板に出ます。空欄の行は消えます。</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===== テンプレート一覧シート ===== -->
+<div class="sheet" id="sh-tpl">
+  <div class="bd"></div>
+  <div class="pn">
+    <div class="hd"><h3>テンプレートを選ぶ</h3><button data-close>閉じる</button></div>
+    <div class="sc">
+      <div id="tplList"></div>
+      <div class="empty hidden" id="tplEmpty">保存されたテンプレートはありません</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 黒板まとめて編集シート ===== -->
+<div class="sheet" id="sh-batch">
+  <div class="bd"></div>
+  <div class="pn">
+    <div class="hd"><h3 id="batchTitle">黒板をまとめて編集</h3><button data-close>閉じる</button></div>
+    <div class="sc">
+      <p class="note" style="margin:0 2px 12px">入力した項目だけ、選んだ写真すべてに上書きされます。空欄のままの項目は変更しません。</p>
+      <div id="batchFields"></div>
+      <div class="sw"><span>日付を変更する</span><input type="checkbox" id="batchUseDate"></div>
+      <label class="f" style="margin-top:12px"><span>日付</span><input type="text" id="batchDate"></label>
+      <div class="sw"><span>大きさを変更する</span><input type="checkbox" id="batchUseSize"></div>
+      <div class="rng"><input type="range" id="batchSize" min="22" max="60" value="38"></div>
+      <button class="btn" id="batchApply" style="margin-top:16px">選んだ写真に適用</button>
     </div>
   </div>
 </div>
@@ -322,6 +367,12 @@ const Store=(()=>{
     async count(sid){ return (await this.bySite(sid)).length; }
   };
 })();
+
+/* ---------- テンプレート（黒板の内容セットを使い回す） ---------- */
+const Templates={
+  async list(){ return (await Store.get('templates'))||[]; },
+  async save(arr){ await Store.set('templates',arr); }
+};
 
 /* ---------- 状態 ---------- */
 const S={ sites:[], siteId:null, photos:[], photo:null, shot:null };
@@ -527,6 +578,14 @@ let bdTarget=null,bdAfter=null;
   $('#bdUseDate').addEventListener('change',e=>{if(!bdTarget)return;bdTarget.f.useDate=e.target.checked;bdAfter&&bdAfter();persistTarget()});
   $('#bdSize').addEventListener('input',e=>{if(!bdTarget)return;bdTarget.board.s=(+e.target.value)/100;bdAfter&&bdAfter();persistTarget()});
 })();
+(function(){
+  const box=$('#batchFields');
+  FIELDS.forEach(x=>{
+    const l=document.createElement('label');l.className='f';
+    l.innerHTML='<span>'+x.l+'</span><input type="text" id="batch_'+x.k+'" placeholder="変更しない">';
+    box.appendChild(l);
+  });
+})();
 function persistTarget(){
   if(!bdTarget||bdTarget===S.shot)return;
   if(bdTarget.siteId!==undefined&&(bdTarget.buf||bdTarget.blob))Store.put(bdTarget);
@@ -540,6 +599,46 @@ function openBoard(target,title,after){
   $('#bdUseDate').checked=target.f.useDate!==false;
   $('#bdSize').value=Math.round(target.board.s*100);
   sheet('sh-board');
+}
+
+/* ---------- テンプレートの保存・読込 ---------- */
+$('#bdTplSave').onclick=async()=>{
+  if(!bdTarget)return;
+  const name=prompt('テンプレート名を入力してください（例：〇〇現場セット）');
+  if(!name||!name.trim())return;
+  const f={};FIELDS.forEach(x=>f[x.k]=bdTarget.f[x.k]||'');
+  const list=await Templates.list();
+  list.unshift({id:uid(),name:name.trim(),f,board:{s:bdTarget.board.s}});
+  await Templates.save(list);
+  toast('テンプレートに保存しました');
+};
+$('#bdTplLoad').onclick=async()=>{ await renderTemplates(); sheet('sh-tpl'); };
+async function renderTemplates(){
+  const list=await Templates.list();
+  const box=$('#tplList');box.innerHTML='';
+  list.forEach(t=>{
+    const d=document.createElement('div');d.className='item';
+    d.innerHTML='<div class="m"><b></b><span>タップで読み込み</span></div>'+
+      '<button class="t-btn" data-del style="color:var(--sub)">削除</button>';
+    d.querySelector('b').textContent=t.name;
+    d.onclick=()=>{
+      if(!bdTarget)return;
+      FIELDS.forEach(x=>{ if(t.f[x.k])bdTarget.f[x.k]=t.f[x.k]; });
+      FIELDS.forEach(x=>$('#bd_'+x.k).value=bdTarget.f[x.k]||'');
+      if(t.board&&t.board.s){bdTarget.board.s=t.board.s;$('#bdSize').value=Math.round(t.board.s*100);}
+      bdAfter&&bdAfter();persistTarget();
+      sheet('sh-tpl',false);
+      toast(t.name+' を読み込みました');
+    };
+    d.querySelector('[data-del]').onclick=async(e)=>{
+      e.stopPropagation();
+      if(!confirm(t.name+' を削除します'))return;
+      const arr=(await Templates.list()).filter(x=>x.id!==t.id);
+      await Templates.save(arr);renderTemplates();
+    };
+    box.appendChild(d);
+  });
+  $('#tplEmpty').classList.toggle('hidden',list.length>0);
 }
 
 /* ---------- 現場 ---------- */
@@ -586,20 +685,66 @@ async function openPhotos(sid){
   S.siteId=sid;await save();updateChip();
   const s=site();$('#phTitle').textContent=s.name;
   S.photos=await Store.bySite(sid);
+  setSelMode(false);
   const g=$('#phGrid');g.innerHTML='';
   for(let i=0;i<S.photos.length;i++){
     const ph=S.photos[i];
     const c=document.createElement('div');c.className='cell';
-    c.innerHTML='<i>'+(i+1)+'</i>';
+    c.innerHTML='<i>'+(i+1)+'</i><div class="chk">✓</div>';
     const im=document.createElement('img');c.prepend(im);
     (await compose(ph)).toBlob(b=>im.src=URL.createObjectURL(b),'image/jpeg',.6);
-    c.onclick=()=>openPhoto(ph);
+    c.onclick=()=>{
+      if(selMode){
+        if(selIds.has(ph.id)){selIds.delete(ph.id);c.classList.remove('sel');}
+        else{selIds.add(ph.id);c.classList.add('sel');}
+        updateSelCount();
+      }else openPhoto(ph);
+    };
     g.appendChild(c);
   }
   $('#phEmpty').classList.toggle('hidden',S.photos.length>0);
   $('#phActions').classList.toggle('hidden',S.photos.length===0);
   view('v-photos');
 }
+
+/* ---------- 複数選択・黒板まとめて編集 ---------- */
+let selMode=false,selIds=new Set();
+function updateSelCount(){$('#phSelCount').textContent=selIds.size+'枚選択中';}
+function setSelMode(on){
+  selMode=on;selIds.clear();updateSelCount();
+  $('#phBatchBar').classList.toggle('hidden',!on);
+  $('#phSelectBtn').textContent=on?'選択をやめる':'複数選んで黒板をまとめて編集';
+  $$('#phGrid .cell').forEach(c=>c.classList.remove('sel'));
+}
+$('#phSelectBtn').onclick=()=>setSelMode(!selMode);
+$('#phSelCancel').onclick=()=>setSelMode(false);
+$('#phBatchEdit').onclick=()=>{
+  if(!selIds.size){toast('写真を選んでください');return}
+  FIELDS.forEach(x=>$('#batch_'+x.k).value='');
+  $('#batchDate').value=todayJP();$('#batchUseDate').checked=false;
+  $('#batchUseSize').checked=false;$('#batchSize').value=38;
+  $('#batchTitle').textContent=selIds.size+'枚の黒板をまとめて編集';
+  sheet('sh-batch');
+};
+$('#batchApply').onclick=async()=>{
+  const btn=$('#batchApply');btn.disabled=true;const t=btn.textContent;btn.textContent='適用中…';
+  const patch={};
+  FIELDS.forEach(x=>{const v=$('#batch_'+x.k).value;if(v.trim())patch[x.k]=v;});
+  const useDate=$('#batchUseDate').checked,dateVal=$('#batchDate').value;
+  const useSize=$('#batchUseSize').checked,sizeVal=(+$('#batchSize').value)/100;
+  let n=0;
+  for(const ph of S.photos){
+    if(!selIds.has(ph.id))continue;
+    Object.keys(patch).forEach(k=>ph.f[k]=patch[k]);
+    if(useDate){ph.f.date=dateVal;ph.f.useDate=true;}
+    if(useSize)ph.board.s=sizeVal;
+    await Store.put(ph);n++;
+  }
+  btn.disabled=false;btn.textContent=t;
+  sheet('sh-batch',false);
+  toast(n+'枚に反映しました');
+  openPhotos(S.siteId);
+};
 $('#phBack').onclick=()=>{renderSites();view('v-sites')};
 $('#phSet').onclick=()=>{
   const s=site();$('#stName').value=s.name;
