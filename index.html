@@ -105,6 +105,8 @@ input{font:inherit}
   font-size:10px;font-style:normal;padding:1px 6px;border-radius:999px}
 
 .empty{text-align:center;color:var(--sub);font-size:13px;padding:44px 20px}
+#phImportWrap{margin-top:16px}
+#phImportWrap .btn:disabled{opacity:.5}
 .btn{display:block;width:100%;padding:14px;border-radius:999px;background:var(--ink);color:#fff;
   font-weight:600;text-align:center;margin-top:10px}
 .btn.g{background:#fff;color:var(--ink);border:1px solid var(--ink)}
@@ -214,6 +216,13 @@ label.f>input:focus{outline:2px solid var(--ink)}
   <div class="body">
     <div class="grid" id="phGrid"></div>
     <div class="empty hidden" id="phEmpty">この現場の写真はまだありません</div>
+    <div id="phImportWrap">
+      <button class="btn g" id="phImportBtn">写真を追加して黒板を貼る</button>
+      <button class="btn q" id="phImportDirBtn">フォルダごとまとめて追加</button>
+      <p class="note">選んだ写真すべてに、今の現場の黒板内容がそのまま貼られます。あとで1枚ずつ内容を直せます。</p>
+      <input type="file" id="phImportInput" accept="image/*" multiple class="hidden">
+      <input type="file" id="phImportDirInput" accept="image/*" multiple webkitdirectory class="hidden">
+    </div>
     <div id="phActions">
       <button class="btn" id="phPdf">PDFを作る</button>
     </div>
@@ -596,6 +605,40 @@ $('#phSet').onclick=()=>{
   const s=site();$('#stName').value=s.name;
   sheet('sh-site');
 };
+
+/* ---------- 既存の写真を取り込む（黒板は現場の現在値をそのままコピー） ---------- */
+async function importPhotos(fileList){
+  const s=site(); if(!s){toast('現場を選んでください');return}
+  const list=[...fileList].filter(f=>f.type.startsWith('image/'));
+  if(!list.length){toast('画像が見つかりませんでした');return}
+  const b1=$('#phImportBtn'),b2=$('#phImportDirBtn');
+  const t1=b1.textContent,t2=b2.textContent;
+  b1.disabled=true;b2.disabled=true;
+  let ok=0;const base=Date.now();
+  for(let i=0;i<list.length;i++){
+    b1.textContent='取り込み中… '+(i+1)+'/'+list.length;
+    try{
+      const bmp=await createImageBitmap(list[i],{imageOrientation:'from-image'});
+      const r=Math.min(1,MAXEDGE/Math.max(bmp.width,bmp.height));
+      const c=document.createElement('canvas');
+      c.width=Math.round(bmp.width*r);c.height=Math.round(bmp.height*r);
+      c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+      const blob=await new Promise(res=>c.toBlob(res,'image/jpeg',.92));
+      const ph={id:uid(),siteId:s.id,buf:await blob.arrayBuffer(),mime:'image/jpeg',
+        w:c.width,h:c.height,
+        f:JSON.parse(JSON.stringify(s.f)),board:{...s.board},at:base+i};
+      await Store.put(ph);ok++;
+    }catch(e){/* 読み込めない形式などはスキップ */}
+  }
+  b1.disabled=false;b2.disabled=false;b1.textContent=t1;b2.textContent=t2;
+  await refreshCount();
+  openPhotos(s.id);
+  toast(ok?ok+'枚に黒板を貼りました':'取り込めませんでした');
+}
+$('#phImportBtn').onclick=()=>$('#phImportInput').click();
+$('#phImportInput').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';if(f.length)importPhotos(f)});
+$('#phImportDirBtn').onclick=()=>$('#phImportDirInput').click();
+$('#phImportDirInput').addEventListener('change',e=>{const f=[...e.target.files];e.target.value='';if(f.length)importPhotos(f)});
 
 /* ---------- 写真1枚 ---------- */
 async function openPhoto(ph){
